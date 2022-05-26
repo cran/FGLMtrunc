@@ -1,0 +1,189 @@
+---
+title: "An introduction to `FGLMtrunc`"
+output: 
+  rmarkdown::html_vignette:
+    toc: yes
+    toc_depth: 3
+    number_sections: false
+vignette: >
+  %\VignetteIndexEntry{FGLMtrunc}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+hook_output <- knitr::knit_hooks$get("output")
+# set a new output hook to truncate text output
+knitr::knit_hooks$set(output = function(x, options) {
+  if (!is.null(n <- options$out.lines)) {
+    x <- xfun::split_lines(x)
+    if (length(x) > n) {
+        
+      # truncate the output
+      x <- c(head(x, n), "....\n")
+    }
+    x <- paste(x, collapse = "\n")
+  }
+  hook_output(x, options)
+})
+```
+
+## Introduction
+`FGLMtrunc` is a package that fits truncated Functional Generalized Linear Models as described in [Liu, Divani, and Petersen (2020)](https://doi.org/10.1016/j.csda.2022.107421). It implements methods for both functional linear and functional logistic regression models. The solution path is computed efficiently using active set algorithm with warm start. Optimal smoothing and truncation parameters ($\lambda_s, \lambda_t$) are chosen by Bayesian information criterion (BIC).
+
+To install `FGLMtrunc` directly from CRAN, type in R console this command:
+```{r, eval=F}
+install.packages("FGLMtrunc")
+```
+To load the `FGLMtrunc` package, type in R console:
+```{r}
+library(FGLMtrunc)
+```
+The function for fitting model is `fglm_trunc`, which have arguments to customize the fit. Below are details on some required arguments:
+
+* `X.curves` is required for matrix of functional predictors. 
+
+* `Y` is required for response vector.
+
+* Either `nbasis` or `knots` is needed to define the interior knots of B-spline.
+
+Please use `?fglm_trunc` for more details on function arguments. We will demonstrate usages of other commonly used arguments by examples.
+
+## Functional Linear Regression (`family="gaussian"`)
+Functional linear regression model is the default choice of function `fglm_trunc` with argument `family="gaussian"`.
+For illustration, we use dataset `LinearExample`, which we created beforehand following Case I in simulation studies section from Liu et. al. (2020). This dataset contains $n=200$ observations, and functional predictors are observed at $p=101$ timepoints on $[0,1]$ interval. The true truncation point is $\delta = 0.54$.
+
+```{r, fig.align='center', fig.height=4, fig.width=4}
+data(LinearExample)
+Y_linear = LinearExample$Y
+Xcurves_linear = LinearExample$X.curves
+timeGrid = seq(0, 1, length.out = 101)
+plot(timeGrid, LinearExample$beta.true, type = 'l', 
+     main = 'True coefficient function', xlab = "t", ylab=expression(beta(t)))
+```
+
+### Fitting `FGLMtrunc` model for linear regression
+
+We fit the model using 50 B-spline basis with default `degree=3` for cubic splines. Since argument `grid` is not specified, an equally spaced sequence of length $p=101$ on $[0,1]$ interval (including boundaries) will automatically be used.
+```{r}
+fit = fglm_trunc(Y_linear, Xcurves_linear, nbasis = 50)
+```
+`fglm_trunc` also supports parallel computing to speed up the running time of tuning regularization parameters. Parallel backend must be registered before hand. Here is an example of using parallel with `doMC` backend (we cannot run the code here since it is not available for Windows) :
+```{r, eval=F}
+library(doMC)
+registerDoMC(cores = 2)
+fit = fglm_trunc(Y_linear, Xcurves_linear, nbasis = 50, parallel = TRUE)
+```
+
+One can also manually provides `grid` or `knots` sequences (or both). If `knots` is specified, `nbasis` will be ignored.
+```{r, eval=F}
+k <- 50 - 3 - 1 #Numbers of knots = nbasis - degree - 1
+knots_n <- seq(0, 1, length.out = k+2)[-c(1, k+2)] # Remove boundary knots
+fit2 = fglm_trunc(Y_linear, Xcurves_linear, grid = timeGrid, knots = knots_n)
+```
+
+`fit` and `fit2` fitted models will have the same results. 
+
+`fit` is an object of class `FGLMtrunc` that contains relevant estimation results. Please use `?fglm_trunc` for more details on function outputs. Function call and truncation point will be printed with `print` function:
+```{r}
+print(fit)
+``` 
+
+### Plotting with fitted `FGLMtrunc` model
+We can visualize the estimates of functional parameter $\beta$ directly with `plot`:
+```{r, fig.align='center', fig.height=4, fig.width=4}
+plot(fit)
+```
+
+The plot shows both smoothing and truncated estimates of $\beta$. We can set argument `include_smooth=FALSE` to show only truncated estimate.
+
+### Predicting with fitted `FGLMtrunc` model
+Predict method for `FGLMtrunc` fits works similar to `predict.glm`. Type `"link"` is the default choice for `FGLMtrunc` object. For linear regression, both type `"link"` and `"response"` return fitted values. `newX.curves` is required for these predictions.
+```{r}
+predict(fit, newX.curves = Xcurves_linear[1:5,])
+```
+
+To get truncated estimate of $\beta$, we can use either `fit$beta.truncated` or `predict` function:
+```{r out.lines = 12}
+predict(fit, type = "coefficients")
+```
+
+## Functional Logistic Regression (`family="binomial"`)
+
+For logistic regression, we use dataset `LogisticExample`, which is similar to `LinearExample`, but the response $Y$ was generated as Bernoulli random variable.
+
+```{r}
+data(LogisticExample)
+Y_logistic = LogisticExample$Y
+Xcurves_logistic = LogisticExample$X.curves
+```
+
+### Fitting `FGLMtrunc` model for logistic regression
+
+Similarly, we fit the model using 50 B-spline basis with default choice of cubic splines. We need to set `family="binomial"` for logistic regression. Printing and plotting are the same as before.
+```{r}
+fit4 = fglm_trunc(Y_logistic, Xcurves_logistic, family="binomial", nbasis = 50)
+```
+
+```{r, fig.align='center', fig.height=4, fig.width=4}
+print(fit4)
+plot(fit4)
+```
+
+### Predicting with fitted `FGLMtrunc` model for logistic regression
+For functional logistic regression, each `type` option returns a different prediction: 
+
+* `type="link"` gives the linear predictors which are log-odds.
+
+* `type="response"` gives the predicted probabilities.
+
+* `type="coefficients"` gives truncated estimate of functional parameter $\beta$ as before.
+
+```{r, fig.align='center', fig.height=4, fig.width=4}
+logistic_link_pred = predict(fit4, newX.curves = Xcurves_logistic, type="link")
+plot(logistic_link_pred, ylab="log-odds")
+```
+
+```{r, fig.align='center', fig.height=4, fig.width=4}
+logistic_response_pred = predict(fit4, newX.curves = Xcurves_logistic, type="response")
+plot(logistic_response_pred, ylab="predicted probabilities")
+```
+
+## Functional Linear Regression with scalar predictors
+### Fitting `FGLMtrunc` model
+`FGLMtrunc` allows using scalar predictors together with functional predictors. First, we randomly generate observations for scalar predictors: 
+
+```{r}
+scalar_coef <- c(1, -1, 0.5) # True coefficients for scalar predictors
+set.seed(1234)
+S <- cbind(matrix(rnorm(400), nrow=200), rbinom(200, 1, 0.5))  # Randomly generated observations for scalar predictors. Binary coded as 0 and 1.
+colnames(S) <- c("s1", "s2", "s3")
+```
+
+Next, we modify the response vector from `LinearExample` so that it takes into account scalar predictors:
+
+```{r}
+Y_scalar <- Y_linear + (S %*% scalar_coef)
+```
+
+Then we fit `FGLMtrunc` model with the matrix of scalar predictors `S`:
+
+```{r}
+fit_scalar = fglm_trunc(X.curves=Xcurves_linear, Y=Y_scalar, S=S, nbasis = 50)
+fit_scalar
+```
+
+Fitted coefficients for scalar predictors are close to the true values.
+
+### Predicting with scalar predictors
+
+To make prediction with fitted model using scalar predictors, we need to specified argument `newS`:
+
+```{r}
+predict(fit_scalar, newX.curves = Xcurves_linear[1:5,], newS=S[1:5,])
+```
+
